@@ -33,20 +33,20 @@
 <p>Write or paste an SMS-message below and press <strong>Analyze</strong> The model has been trained on two classes:</p>
 
 <ul>
-    <li><strong>ham</strong> – legitimt meddelande</li>
-    <li><strong>spam</strong> – oönskat reklam‑/skräppost</li>
+    <li><strong>ham</strong> – legitimate message</li>
+    <li><strong>spam</strong> – advertisement‑/shitpost</li>
 </ul>
 
-<textarea id="txtInput" placeholder="Skriv ditt meddelande här…"></textarea>
+<textarea id="txtInput" placeholder="Write your message here…"></textarea>
  
-<button id="btnPredict">Analysera</button>
+<button id="btnPredict">Analyze</button>
 
-<div id="result">Resultat: –</div>
+<div id="result">Result: –</div>
 
 <hr>
 
-<h2>Debug‑ruta</h2>
-<div id="debug">Startar…</div>
+<h2>Debug‑window</h2>
+<div id="debug">Starting…</div>
 
 <script>
 /* ------------------------------------------------------------------
@@ -78,13 +78,13 @@ async function loadModel() {
     try {
         // *** Viktigt: loadLayersModel för "layers-model"-format ***
         model = await tf.loadLayersModel(MODEL_URL);
-        logDebug(`✅ Modell laddad från ${MODEL_URL}`);
+        logDebug(`✅ Model loaded from ${MODEL_URL}`);
 
         // Visa modellens input‑shape (för felsökning)
         const inputShape = model.inputs[0].shape;   // t.ex. [null,30]
-        logDebug(`Modellens förväntade input‑shape: ${JSON.stringify(inputShape)}`);
+        logDebug(`Models predicted input‑shape: ${JSON.stringify(inputShape)}`);
     } catch (e) {
-        logDebug(`❌ Misslyckades med att ladda modell: ${e}`, true);
+        logDebug(`❌ Failed loading model: ${e}`, true);
     }
 }
 
@@ -126,13 +126,13 @@ function textToSequence(text) {
    ------------------------------------------------------------------ */
 document.getElementById('btnPredict').addEventListener('click', async () => {
     if (!model) {
-        logDebug('Modellen är ännu inte laddad – vänta tills den visas i debug‑rutan.', true);
+        logDebug('Model is not yet loaded, wait until it shows in debug window.', true);
         return;
     }
 
     const raw = document.getElementById('txtInput').value.trim();
     if (!raw) {
-        logDebug('Ingen text angiven.', true);
+        logDebug('no text given.', true);
         return;
     }
 
@@ -148,9 +148,9 @@ document.getElementById('btnPredict').addEventListener('click', async () => {
         document.getElementById('result').textContent =
             `Resultat: ${label.toUpperCase()} (spam‑sannolikhet ${(prob*100).toFixed(1)} %)`;
 
-        logDebug(`✅ Prediktion klar – prob=${prob.toFixed(4)} → ${label}`);
+        logDebug(`✅ Prediction done - done=${prob.toFixed(4)} → ${label}`);
     } catch (e) {
-        logDebug(`❌ Fel under inferens: ${e}`, true);
+        logDebug(`❌ wrong under inferens: ${e}`, true);
     } finally {
         tf.dispose([inputTensor]);
     }
@@ -160,13 +160,13 @@ document.getElementById('btnPredict').addEventListener('click', async () => {
    6️⃣  Initiera – ladda metadata & modell när sidan öppnas
    ------------------------------------------------------------------ */
 (async () => {
-    logDebug('🚀 Initierar…');
+    logDebug('🚀 Initiating…');
     await loadMetadata();
     await loadModel();
     if (model) {
-        logDebug('🟢 Allt är redo – skriv in text och tryck “Analysera”.');
+        logDebug('🟢 Everything is ready - write in text and press "analyze".');
     } else {
-        logDebug('🔴 Modellen kunde inte laddas – kontrollera att filerna finns i /tfjs_model och att de är åtkomliga (CORS).', true);
+        logDebug('🔴 Model could not be loaded – control that files exist in /tfjs_model and that they are reachable (CORS).', true);
     }
 })();
 </script>

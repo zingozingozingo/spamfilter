@@ -2,116 +2,181 @@
 <html lang="sv">
 <head>
     <meta charset="UTF-8">
-    <title>Interaktiv Keras‑modell (TensorFlow.js)</title>
+    <title>Spam‑/Ham‑klassificering med TensorFlow.js</title>
 
-    <!-- TensorFlow.js – CDN -->
+    <!-- TensorFlow.js (v4) – CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0"></script>
 
     <style>
-        body {font-family: Arial, Helvetica, sans-serif; margin: 2rem;}
-        #debug {margin-top: 2rem; padding: 1rem; background:#f9f9f9;
-                border:1px solid #ddd; font-size:0.9rem; white-space: pre-wrap;}
-        #controls {margin-bottom: 1rem;}
-        button {margin-right: .5rem;}
+        body{font-family:Arial,sans-serif;margin:2rem;max-width:800px}
+        h1{margin-bottom:.5rem}
+        textarea{width:100%;height:120px;font-size:1rem;padding:.5rem}
+        button{margin-top:.5rem;padding:.5rem 1rem;font-size:1rem}
+        #result{margin-top:1rem;font-weight:bold}
+        #debug{
+            margin-top:2rem;
+            padding:.75rem;
+            background:#f9f9f9;
+            border:1px solid #ddd;
+            white‑space:pre-wrap;
+            font-family:monospace;
+            font-size:.9rem;
+            max-height:250px;
+            overflow:auto;
+        }
     </style>
 </head>
 <body>
 
-<h1>Demo: kör din Keras‑modell i webbläsaren</h1>
+<h1>Spam‑/Ham‑klassificering (TF‑JS)</h1>
 
-<div id="controls">
-    <!-- Exempel‑input – anpassa efter din modell -->
-    <label for="inp">Ange värde (kommaseparerade tal):</label>
-    <input type="text" id="inp" placeholder="ex. 0.5, 1.2, -0.3 …">
-    <button id="runBtn">Kör modell</button>
-</div>
+<p>Skriv eller klistra in ett SMS‑meddelande nedan och tryck <strong>Analysera</strong>.  
+Modellen har tränats på två klasser:</p>
 
-<p id="output">Resultat: –</p>
+<ul>
+    <li><strong>ham</strong> – legitimt meddelande</li>
+    <li><strong>spam</strong> – oönskat reklam‑/skräppost</li>
+</ul>
+
+<textarea id="txtInput" placeholder="Skriv ditt meddelande här…"></textarea>
+ 
+<button id="btnPredict">Analysera</button>
+
+<div id="result">Resultat: –</div>
 
 <hr>
 
 <h2>Debug‑ruta</h2>
-<div id="debug">Laddar…</div>
+<div id="debug">Startar…</div>
 
 <script>
-/* -------------------------------------------------------------
-   1️⃣  Ladda modellen
-   ------------------------------------------------------------- */
-const MODEL_PATH = "./tfjs_model/model.json";   // relativ sökväg i ditt repo
+/* ------------------------------------------------------------------
+   1️⃣  Hämta metadata (ord‑till‑index‑tabell) och bygg tokeniserare
+   ------------------------------------------------------------------ */
+const METADATA_URL = "./tfjs_model/metadata.json";
+let wordIndex = {};               // <ord> → heltal
+let vocabSize = 0;
+
+async function loadMetadata() {
+    try {
+        const resp = await fetch(METADATA_URL);
+        const meta = await resp.json();
+        wordIndex = meta.word_index || {};
+        vocabSize = Object.keys(wordIndex).length;
+        logDebug(`✅ metadata.json laddad – ${vocabSize} ord i vokabuläret`);
+    } catch (e) {
+        logDebug(`❌ Kunde inte läsa metadata.json: ${e}`, true);
+    }
+}
+
+/* ------------------------------------------------------------------
+   2️⃣  Ladda TensorFlow‑modellen
+   ------------------------------------------------------------------ */
+const MODEL_URL = "./tfjs_model/model.json";
 let model = null;
 
-// En funktion som skriver meddelanden i debug‑rutan
+async function loadModel() {
+    try {
+        model = await tf.loadGraphModel(MODEL_URL);
+        logDebug(`✅ Modell laddad från ${MODEL_URL}`);
+        // Visa modellens input‑shape (för felsökning)
+        const inputShape = model.inputs[0].shape;   // t.ex. [null,30]
+        logDebug(`Modellens förväntade input‑shape: ${JSON.stringify(inputShape)}`);
+    } catch (e) {
+        logDebug(`❌ Misslyckades med att ladda modell: ${e}`, true);
+    }
+}
+
+/* ------------------------------------------------------------------
+   3️⃣  Hjälpfunktioner för debug‑rutan
+   ------------------------------------------------------------------ */
 function logDebug(msg, isError = false) {
     const dbg = document.getElementById('debug');
-    const line = (isError ? "[ERROR] " : "") + msg;
-    dbg.textContent += line + "\n";
-    // Scrolla automatiskt så senaste meddelandet syns
+    const line = (isError ? '[FEL] ' : '') + msg;
+    dbg.textContent += line + '\n';
     dbg.scrollTop = dbg.scrollHeight;
 }
 
-// Starta laddning
-logDebug("Initierar modell‑laddning …");
-tf.loadGraphModel(MODEL_PATH)
-    .then(m => {
-        model = m;
-        logDebug("✅ Modell laddad.");
-        // Visa lite metadata (om den finns i model.json)
-        if (model.executor && model.executor.graph && model.executor.graph.nodes) {
-            logDebug(`Antal noder i grafen: ${model.executor.graph.nodes.length}`);
-        }
-    })
-    .catch(err => {
-        logDebug("❌ Kunde inte ladda modell: " + err.message, true);
-    });
+/* ------------------------------------------------------------------
+   4️⃣  Text‑till‑sekvens‑konvertering
+        – tokeniserar med word_index
+        – truncera/padder till exakt 30 tokens (enligt modellen)
+   ------------------------------------------------------------------ */
+const MAX_LEN = 30;                 // definierat i model.config → batch_input_shape[1]
 
-/* -------------------------------------------------------------
-   2️⃣  Kör modellen när användaren trycker på knappen
-   ------------------------------------------------------------- */
-document.getElementById('runBtn').addEventListener('click', async () => {
+function textToSequence(text) {
+    // Gör om till gemener och dela på mellanslag / skiljetecken
+    const tokens = text
+        .toLowerCase()
+        .replace(/[^\w\s]/g, ' ')      // ta bort punctuation
+        .split(/\s+/)
+        .filter(t => t.length);        // ta bort tomma strängar
+
+    // Översätt varje ord till index, använd <OOV> (1) om ordet saknas
+    const seq = tokens.map(w => wordIndex[w] ?? 1);
+
+    // Trunka eller paddra till MAX_LEN
+    if (seq.length > MAX_LEN) {
+        return seq.slice(0, MAX_LEN);
+    } else if (seq.length < MAX_LEN) {
+        const pad = new Array(MAX_LEN - seq.length).fill(0); // 0 = padding‑token
+        return seq.concat(pad);
+    }
+    return seq;
+}
+
+/* ------------------------------------------------------------------
+   5️⃣  Prediktion
+   ------------------------------------------------------------------ */
+document.getElementById('btnPredict').addEventListener('click', async () => {
     if (!model) {
-        logDebug("Modellen är ännu inte klar. Vänta tills den är laddad.", true);
+        logDebug('Modellen är ännu inte laddad – vänta tills den visas i debug‑rutan.', true);
         return;
     }
 
-    const txt = document.getElementById('inp').value.trim();
-    if (!txt) {
-        logDebug("Ingen input angiven.", true);
+    const raw = document.getElementById('txtInput').value.trim();
+    if (!raw) {
+        logDebug('Ingen text angiven.', true);
         return;
     }
 
-    // ----------- 2a. Parsning av input -------------------------
-    // Vi antar att modellen tar en 1‑D‑tensor med flyttal.
-    // Anpassa detta om din modell har annan form.
-    const parts = txt.split(',').map(s => parseFloat(s.trim()));
-    if (parts.some(isNaN)) {
-        logDebug("Input‑värdena måste vara tal separerade med kommatecken.", true);
-        return;
-    }
+    // 1. Tokenisera → sekvens av heltal
+    const seq = textToSequence(raw);
+    // 2. Skapa Tensor av formen [1,30] (batch‑size 1)
+    const inputTensor = tf.tensor2d([seq], [1, MAX_LEN], 'int32');
 
-    // ----------- 2b. Skapa Tensor -------------------------------
-    // Här antas shape = [1, N] (batch‑storlek 1). Ändra vid behov.
-    const inputTensor = tf.tensor2d([parts]);
-
-    // ----------- 2c. Inferens -----------------------------------
     try {
-        const pred = model.predict(inputTensor);
-        // pred kan vara en Tensor eller en lista av Tensors.
-        // Vi hanterar båda fallen.
-        const result = Array.isArray(pred) ?
-            await Promise.all(pred.map(t => t.data())) :
-            await pred.data();
+        // 3. Kör modellen
+        const output = model.predict(inputTensor);
+        // Output är en Tensor med shape [1,1] och sigmoid‑värde
+        const prob = (await output.data())[0];   // sannolikhet för "spam"
+        const label = prob >= 0.5 ? 'spam' : 'ham';
 
-        // Visa resultatet på sidan
-        document.getElementById('output').textContent =
-            "Resultat: " + JSON.stringify(Array.from(result));
-        logDebug("✅ Inferens klar. Output‑shape: " + JSON.stringify(pred.shape));
+        // 4. Visa resultatet
+        document.getElementById('result').textContent =
+            `Resultat: ${label.toUpperCase()} (spam‑sannolikhet ${(prob*100).toFixed(1)} %)`;
+
+        logDebug(`✅ Prediktion klar – prob=${prob.toFixed(4)} → ${label}`);
     } catch (e) {
-        logDebug("❌ Fel under inferens: " + e.message, true);
+        logDebug(`❌ Fel under inferens: ${e}`, true);
     } finally {
-        // Rensa tensorer för att undvika minnesläckage
-        tf.dispose([inputTensor]);
+        tf.dispose([inputTensor]);   // frigör GPU‑minne
     }
 });
+
+/* ------------------------------------------------------------------
+   6️⃣  Initiera – ladda metadata och modell så snart sidan öppnas
+   ------------------------------------------------------------------ */
+(async () => {
+    logDebug('🚀 Initierar…');
+    await loadMetadata();
+    await loadModel();
+    if (model) {
+        logDebug('🟢 Allt är redo – skriv in text och tryck “Analysera”.');
+    } else {
+        logDebug('🔴 Modellen kunde inte laddas – kontrollera att filerna finns i /tfjs_model.', true);
+    }
+})();
 </script>
 
 </body>

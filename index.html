@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <title>Interaktiv Keras‑modell (TensorFlow.js)</title>
+
+    <!-- TensorFlow.js – CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0"></script>
+
+    <style>
+        body {font-family: Arial, Helvetica, sans-serif; margin: 2rem;}
+        #debug {margin-top: 2rem; padding: 1rem; background:#f9f9f9;
+                border:1px solid #ddd; font-size:0.9rem; white-space: pre-wrap;}
+        #controls {margin-bottom: 1rem;}
+        button {margin-right: .5rem;}
+    </style>
+</head>
+<body>
+
+<h1>Demo: kör din Keras‑modell i webbläsaren</h1>
+
+<div id="controls">
+    <!-- Exempel‑input – anpassa efter din modell -->
+    <label for="inp">Ange värde (kommaseparerade tal):</label>
+    <input type="text" id="inp" placeholder="ex. 0.5, 1.2, -0.3 …">
+    <button id="runBtn">Kör modell</button>
+</div>
+
+<p id="output">Resultat: –</p>
+
+<hr>
+
+<h2>Debug‑ruta</h2>
+<div id="debug">Laddar…</div>
+
+<script>
+/* -------------------------------------------------------------
+   1️⃣  Ladda modellen
+   ------------------------------------------------------------- */
+const MODEL_PATH = "./tfjs_model/model.json";   // relativ sökväg i ditt repo
+let model = null;
+
+// En funktion som skriver meddelanden i debug‑rutan
+function logDebug(msg, isError = false) {
+    const dbg = document.getElementById('debug');
+    const line = (isError ? "[ERROR] " : "") + msg;
+    dbg.textContent += line + "\n";
+    // Scrolla automatiskt så senaste meddelandet syns
+    dbg.scrollTop = dbg.scrollHeight;
+}
+
+// Starta laddning
+logDebug("Initierar modell‑laddning …");
+tf.loadGraphModel(MODEL_PATH)
+    .then(m => {
+        model = m;
+        logDebug("✅ Modell laddad.");
+        // Visa lite metadata (om den finns i model.json)
+        if (model.executor && model.executor.graph && model.executor.graph.nodes) {
+            logDebug(`Antal noder i grafen: ${model.executor.graph.nodes.length}`);
+        }
+    })
+    .catch(err => {
+        logDebug("❌ Kunde inte ladda modell: " + err.message, true);
+    });
+
+/* -------------------------------------------------------------
+   2️⃣  Kör modellen när användaren trycker på knappen
+   ------------------------------------------------------------- */
+document.getElementById('runBtn').addEventListener('click', async () => {
+    if (!model) {
+        logDebug("Modellen är ännu inte klar. Vänta tills den är laddad.", true);
+        return;
+    }
+
+    const txt = document.getElementById('inp').value.trim();
+    if (!txt) {
+        logDebug("Ingen input angiven.", true);
+        return;
+    }
+
+    // ----------- 2a. Parsning av input -------------------------
+    // Vi antar att modellen tar en 1‑D‑tensor med flyttal.
+    // Anpassa detta om din modell har annan form.
+    const parts = txt.split(',').map(s => parseFloat(s.trim()));
+    if (parts.some(isNaN)) {
+        logDebug("Input‑värdena måste vara tal separerade med kommatecken.", true);
+        return;
+    }
+
+    // ----------- 2b. Skapa Tensor -------------------------------
+    // Här antas shape = [1, N] (batch‑storlek 1). Ändra vid behov.
+    const inputTensor = tf.tensor2d([parts]);
+
+    // ----------- 2c. Inferens -----------------------------------
+    try {
+        const pred = model.predict(inputTensor);
+        // pred kan vara en Tensor eller en lista av Tensors.
+        // Vi hanterar båda fallen.
+        const result = Array.isArray(pred) ?
+            await Promise.all(pred.map(t => t.data())) :
+            await pred.data();
+
+        // Visa resultatet på sidan
+        document.getElementById('output').textContent =
+            "Resultat: " + JSON.stringify(Array.from(result));
+        logDebug("✅ Inferens klar. Output‑shape: " + JSON.stringify(pred.shape));
+    } catch (e) {
+        logDebug("❌ Fel under inferens: " + e.message, true);
+    } finally {
+        // Rensa tensorer för att undvika minnesläckage
+        tf.dispose([inputTensor]);
+    }
+});
+</script>
+
+</body>
+</html>

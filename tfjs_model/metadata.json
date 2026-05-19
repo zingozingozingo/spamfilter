@@ -1,0 +1,15 @@
+{
+  "model_name": "IMDB_Sentiment_Model",
+  "description": "A simple sentiment analysis model for IMDB reviews",
+  "input_shape": [
+    null,
+    256
+  ],
+  "output_labels": [
+    "negative",
+    "positive"
+  ],
+  "vocab_size": 10000,
+  "max_length": 256,
+  "created_with": "TensorFlow Keras and TensorFlow.js"
+}
